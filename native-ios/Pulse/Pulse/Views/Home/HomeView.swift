@@ -1,145 +1,83 @@
 import SwiftUI
 
+/// Mirrors mobile web Home (`renderMobilePage` → home): month switcher, monthly net hero,
+/// income/spending/transactions/savings-rate grid, top categories with bars, latest 5 txs.
 struct HomeView: View {
     @EnvironmentObject private var appState: AppState
-    var onSearch: () -> Void
-    var onTrips: () -> Void
 
-    private var month: MonthSummary { appState.monthSummary(for: appState.selectedMonth) }
-    private var year: MonthSummary { appState.yearSummary(for: appState.selectedMonth) }
-    private var topCategories: [(name: String, total: Double)] {
-        Array(appState.parentExpenseTotals(for: appState.selectedMonth).prefix(4))
+    private var month: MonthSummary { appState.monthSummary(for: appState.activeMonth) }
+    private var categories: [(name: String, total: Double)] {
+        Array(appState.parentExpenseTotals(for: appState.activeMonth).prefix(5))
     }
+    private var maxCategory: Double { categories.map(\.total).max() ?? 1 }
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                PulseBackground()
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 18) {
-                        header
-                        MonthSwitcher()
-                        netHero
-                        summaryGrid
-                        topCategoriesSection
-                        recentSection
-                    }
-                    .padding(.horizontal, 18)
-                    .padding(.top, 12)
-                    .padding(.bottom, 120)
-                }
-                .refreshable {
-                    await appState.refreshAll()
-                }
-            }
-            .toolbar(.hidden, for: .navigationBar)
-        }
-    }
-
-    private var header: some View {
-        HStack(alignment: .top) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Welcome back")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(PulseTheme.textMuted)
-                Text(appState.displayName)
-                    .font(PulseTheme.titleFont)
-            }
-            Spacer()
-            HStack(spacing: 10) {
-                Button(action: onSearch) {
-                    Image(systemName: "magnifyingglass")
-                        .padding(10)
-                        .background(Circle().fill(Color.white.opacity(0.07)))
-                }
-                Button(action: onTrips) {
-                    Image(systemName: "suitcase.fill")
-                        .padding(10)
-                        .background(Circle().fill(Color.white.opacity(0.07)))
-                }
-            }
-            .foregroundStyle(PulseTheme.textMain)
-        }
-    }
-
-    private var netHero: some View {
-        PulseCard {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("This month’s net")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(PulseTheme.textMuted)
-                Text(MoneyFormat.string(month.net))
-                    .font(.system(size: 36, weight: .bold, design: .rounded))
-                    .foregroundStyle(month.net >= 0 ? PulseTheme.green : PulseTheme.red)
-                Text("Income \(MoneyFormat.string(month.income)) · Spending \(MoneyFormat.string(month.spending))")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(PulseTheme.textMuted)
-            }
-        }
-    }
-
-    private var summaryGrid: some View {
-        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-            MetricTile(label: "Year income", value: MoneyFormat.string(year.income), accent: PulseTheme.green)
-            MetricTile(label: "Year spending", value: MoneyFormat.string(year.spending), accent: PulseTheme.pink)
-            MetricTile(label: "Year net", value: MoneyFormat.string(year.net), accent: year.net >= 0 ? PulseTheme.green : PulseTheme.red)
-            MetricTile(label: "Savings rate", value: String(format: "%.0f%%", year.savingsRate), accent: PulseTheme.blue)
-        }
-    }
-
-    private var topCategoriesSection: some View {
-        PulseCard {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Top categories")
-                    .font(.system(size: 16, weight: .semibold, design: .serif))
-                if topCategories.isEmpty {
-                    Text("Add an expense to see categories here.")
-                        .foregroundStyle(PulseTheme.textMuted)
-                } else {
-                    ForEach(Array(topCategories.enumerated()), id: \.offset) { index, item in
-                        HStack {
-                            Circle()
-                                .fill(PulseTheme.chartColors[index % PulseTheme.chartColors.count])
-                                .frame(width: 8, height: 8)
-                            Text(item.name)
-                            Spacer()
-                            Text(MoneyFormat.string(item.total))
-                                .fontWeight(.semibold)
+        ZStack {
+            PulseBackground()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    MobileMonthSwitcher(
+                        kicker: "Overview",
+                        title: appState.activeMonthLabel,
+                        canGoForward: appState.monthOffset > 0,
+                        onBack: { appState.shiftMonthBack() },
+                        onForward: { appState.shiftMonthForward() },
+                        onSearch: {
+                            Haptics.light()
+                            appState.showSearch = true
                         }
-                        .font(.system(size: 14, design: .rounded))
-                    }
-                }
-            }
-        }
-    }
+                    )
 
-    private var recentSection: some View {
-        PulseCard {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Text("Recent entries")
-                        .font(.system(size: 16, weight: .semibold, design: .serif))
-                    Spacer()
-                    Text("\(appState.selectedMonthTransactions.count)")
-                        .foregroundStyle(PulseTheme.textMuted)
-                        .font(.footnote)
-                }
-                if appState.selectedMonthTransactions.isEmpty {
-                    Text("No transactions this month yet.")
-                        .foregroundStyle(PulseTheme.textMuted)
-                } else {
-                    ForEach(Array(appState.selectedMonthTransactions.prefix(8))) { tx in
-                        TransactionRowView(
-                            transaction: tx,
-                            onEdit: { appState.editTransaction(tx) },
-                            onDelete: { Task { await appState.deleteTransaction(tx) } }
-                        )
-                        if tx.id != appState.selectedMonthTransactions.prefix(8).last?.id {
-                            Divider().overlay(PulseTheme.line.opacity(0.5))
+                    MobileHeroCard(
+                        label: "Monthly net",
+                        value: MoneyFormat.string(month.net),
+                        accent: month.net >= 0 ? PulseTheme.green : PulseTheme.red
+                    )
+
+                    MobileSummaryGrid(items: [
+                        .init(label: "Income", value: MoneyFormat.string(month.income)),
+                        .init(label: "Spending", value: MoneyFormat.string(month.spending)),
+                        .init(label: "Transactions", value: "\(appState.selectedMonthTransactions.count)"),
+                        .init(label: "Savings rate", value: String(format: "%.0f%%", month.savingsRate))
+                    ])
+
+                    MobilePageCard(title: "Top categories", trailing: "\(appState.selectedMonthTransactions.count) entries") {
+                        if categories.isEmpty {
+                            Text("No spending recorded for this month.")
+                                .foregroundStyle(PulseTheme.textMuted)
+                                .font(.system(size: 14, design: .rounded))
+                        } else {
+                            ForEach(Array(categories.enumerated()), id: \.offset) { _, item in
+                                MobileCategoryRow(name: item.name, total: item.total, maxTotal: maxCategory)
+                            }
+                        }
+                    }
+
+                    MobilePageCard(title: "Recent transactions", trailing: "Latest 5") {
+                        if appState.recentTransactions.isEmpty {
+                            Text("No transactions recorded yet.")
+                                .foregroundStyle(PulseTheme.textMuted)
+                                .font(.system(size: 14, design: .rounded))
+                        } else {
+                            ForEach(appState.recentTransactions) { tx in
+                                MobileTransactionRow(
+                                    transaction: tx,
+                                    tripName: appState.tripName(for: tx),
+                                    onEdit: { appState.editTransaction(tx) },
+                                    onDelete: { Task { await appState.deleteTransaction(tx) } }
+                                )
+                                if tx.id != appState.recentTransactions.last?.id {
+                                    Divider().overlay(PulseTheme.line.opacity(0.45))
+                                }
+                            }
                         }
                     }
                 }
+                .padding(.horizontal, 16)
+                .padding(.top, 10)
+                .padding(.bottom, 120)
             }
+            .refreshable { await appState.refreshAll() }
         }
     }
 }

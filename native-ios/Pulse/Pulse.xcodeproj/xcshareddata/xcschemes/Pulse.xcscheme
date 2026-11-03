@@ -14,7 +14,7 @@
             buildForAnalyzing = "YES">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "032510AA19DF4FCCBDE2E7A7"
+               BlueprintIdentifier = "5EC0CF25703049DF9796625C"
                BuildableName = "Pulse.app"
                BlueprintName = "Pulse"
                ReferencedContainer = "container:Pulse.xcodeproj">
@@ -43,7 +43,7 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "032510AA19DF4FCCBDE2E7A7"
+            BlueprintIdentifier = "5EC0CF25703049DF9796625C"
             BuildableName = "Pulse.app"
             BlueprintName = "Pulse"
             ReferencedContainer = "container:Pulse.xcodeproj">
@@ -60,7 +60,7 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "032510AA19DF4FCCBDE2E7A7"
+            BlueprintIdentifier = "5EC0CF25703049DF9796625C"
             BuildableName = "Pulse.app"
             BlueprintName = "Pulse"
             ReferencedContainer = "container:Pulse.xcodeproj">

@@ -1,94 +1,154 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
+/// Mirrors mobile web Settings drill-down: root → General / Data / Travel (+ Savings, Log out).
 struct SettingsView: View {
     @EnvironmentObject private var appState: AppState
-    @State private var showChangePin = false
-    @State private var showSavings = false
-    @State private var showUsers = false
-    @State private var showCategories = false
-    @State private var showAPI = false
     @State private var confirmClear = false
+    @State private var newTripName = ""
+    @State private var showCreateTrip = false
     @State private var exportURL: URL?
     @State private var showShare = false
+    @State private var importPresented = false
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                PulseBackground()
-                List {
-                    Section {
-                        HStack(spacing: 14) {
-                            Image("PulseLogo").resizable().scaledToFit().frame(width: 44, height: 44)
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(appState.displayName).font(.headline)
-                                Text(appState.isAdmin ? "Admin · Private beta" : "Private beta")
-                                    .foregroundStyle(PulseTheme.textMuted)
-                                    .font(.footnote)
-                            }
-                        }
-                        .listRowBackground(PulseTheme.surface)
-                    }
+        ZStack {
+            PulseBackground()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    MobilePageHeader(kicker: "Pulse", title: "Settings")
 
-                    Section("General") {
-                        Button("Change PIN") { showChangePin = true }
-                        Button("Edit categories") { showCategories = true }
-                        Toggle("Lock with Face ID / Touch ID", isOn: Binding(
-                            get: { appState.biometricsEnabled },
-                            set: { appState.setBiometricsEnabled($0) }
-                        ))
-                        Button("API base URL") { showAPI = true }
-                    }
-
-                    Section("Travel & savings") {
-                        NavigationLink("Manage trips") { TripsView().environmentObject(appState) }
-                        Button("Savings goal") { showSavings = true }
-                    }
-
-                    Section("Data") {
-                        Button("Export Excel") {
-                            Task { await exportExcel() }
-                        }
-                        Button("Backup CSV") {
-                            Task { await exportCSV() }
-                        }
-                        Button("Clear all transactions", role: .destructive) {
-                            confirmClear = true
-                        }
-                    }
-
-                    if appState.isAdmin {
-                        Section("Admin") {
-                            Button("User management") { showUsers = true }
-                        }
-                    }
-
-                    Section {
-                        Button("Log out", role: .destructive) {
-                            Task { await appState.logout() }
+                    MobilePageCard(title: paneTitle) {
+                        switch appState.settingsView {
+                        case .root: rootMenu
+                        case .general: generalMenu
+                        case .data: dataMenu
+                        case .travel: travelMenu
                         }
                     }
                 }
-                .scrollContentBackground(.hidden)
-                .listStyle(.insetGrouped)
-            }
-            .navigationTitle("Settings")
-            .sheet(isPresented: $showChangePin) { ChangePinSheet().environmentObject(appState) }
-            .sheet(isPresented: $showSavings) { SavingsGoalSheet().environmentObject(appState) }
-            .sheet(isPresented: $showUsers) { UserManagementView().environmentObject(appState) }
-            .sheet(isPresented: $showCategories) { CategoryEditorView().environmentObject(appState) }
-            .sheet(isPresented: $showAPI) { APISettingsSheet().environmentObject(appState) }
-            .sheet(isPresented: $showShare) {
-                if let exportURL {
-                    ShareSheet(items: [exportURL])
-                }
-            }
-            .confirmationDialog("Clear all transactions?", isPresented: $confirmClear, titleVisibility: .visible) {
-                Button("Clear everything", role: .destructive) {
-                    Task { await appState.clearAllData() }
-                }
+                .padding(.horizontal, 16)
+                .padding(.top, 10)
+                .padding(.bottom, 120)
             }
         }
+        .sheet(isPresented: $appState.showChangePin) { ChangePinSheet().environmentObject(appState) }
+        .sheet(isPresented: $appState.showSavings) { SavingsGoalSheet().environmentObject(appState) }
+        .sheet(isPresented: $appState.showUsers) { UserManagementView().environmentObject(appState) }
+        .sheet(isPresented: $appState.showCategories) { CategoryEditorView().environmentObject(appState) }
+        .sheet(isPresented: $appState.showAPI) { APISettingsSheet().environmentObject(appState) }
+        .sheet(isPresented: $appState.showTrips) { TripsView().environmentObject(appState) }
+        .sheet(isPresented: $appState.showTripSummary) { TripSummaryView().environmentObject(appState) }
+        .sheet(isPresented: $showShare) {
+            if let exportURL { ShareSheet(items: [exportURL]) }
+        }
+        .fileImporter(
+            isPresented: $importPresented,
+            allowedContentTypes: [.commaSeparatedText, .data] + [UTType(filenameExtension: "xlsx")].compactMap { $0 },
+            allowsMultipleSelection: false
+        ) { result in
+            // Import preview pipeline remains server-driven; for now surface guidance.
+            switch result {
+            case .success:
+                appState.errorMessage = "Import preview is available on the web app for now. Use Export/Backup here, or import from desktop Pulse."
+            case .failure(let error):
+                appState.errorMessage = error.localizedDescription
+            }
+        }
+        .alert("Create trip", isPresented: $showCreateTrip) {
+            TextField("Trip name", text: $newTripName)
+            Button("Create") {
+                let name = newTripName.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !name.isEmpty else { return }
+                Task { await appState.createTrip(named: name) }
+                newTripName = ""
+            }
+            Button("Cancel", role: .cancel) {}
+        }
+        .confirmationDialog("Clear all transactions?", isPresented: $confirmClear, titleVisibility: .visible) {
+            Button("Clear everything", role: .destructive) {
+                Task { await appState.clearAllData() }
+            }
+        }
+    }
+
+    private var paneTitle: String {
+        switch appState.settingsView {
+        case .root: return "Menu"
+        case .general: return "General"
+        case .data: return "Data"
+        case .travel: return "Travel"
+        }
+    }
+
+    @ViewBuilder
+    private var rootMenu: some View {
+        MobileSettingsRow(title: "General") { appState.openSettingsPane(.general) }
+        divider
+        MobileSettingsRow(title: "Data") { appState.openSettingsPane(.data) }
+        divider
+        MobileSettingsRow(title: "Travel") { appState.openSettingsPane(.travel) }
+        divider
+        MobileSettingsRow(title: "Savings") { appState.showSavings = true }
+        divider
+        MobileSettingsRow(title: "Log out", isDestructive: true) {
+            Task { await appState.logout() }
+        }
+    }
+
+    @ViewBuilder
+    private var generalMenu: some View {
+        MobileBackRow(title: "General") { appState.openSettingsPane(.root) }
+        divider
+        MobileSettingsRow(title: "Category Management") { appState.showCategories = true }
+        divider
+        MobileSettingsRow(title: "Change PIN") { appState.showChangePin = true }
+        divider
+        MobileSettingsRow(title: "API base URL") { appState.showAPI = true }
+        divider
+        Toggle(isOn: Binding(
+            get: { appState.biometricsEnabled },
+            set: { appState.setBiometricsEnabled($0) }
+        )) {
+            Text("Lock with Face ID / Touch ID")
+                .font(.system(size: 16, weight: .semibold, design: .rounded))
+        }
+        .tint(PulseTheme.pink)
+        .padding(.vertical, 8)
+        divider
+        MobileSettingsRow(title: "Link Financials", subtitle: "Coming soon", disabled: true) {}
+        if appState.isAdmin {
+            divider
+            MobileSettingsRow(title: "User Management") { appState.showUsers = true }
+        }
+    }
+
+    @ViewBuilder
+    private var dataMenu: some View {
+        MobileBackRow(title: "Data") { appState.openSettingsPane(.root) }
+        divider
+        MobileSettingsRow(title: "Import data") { importPresented = true }
+        divider
+        MobileSettingsRow(title: "Export data") { Task { await exportExcel() } }
+        divider
+        MobileSettingsRow(title: "Backup data") { Task { await exportCSV() } }
+        divider
+        MobileSettingsRow(title: "Clear all transactions", isDestructive: true) { confirmClear = true }
+    }
+
+    @ViewBuilder
+    private var travelMenu: some View {
+        MobileBackRow(title: "Travel") { appState.openSettingsPane(.root) }
+        divider
+        MobileSettingsRow(title: "Create new trip") { showCreateTrip = true }
+        divider
+        MobileSettingsRow(title: "Trip management") { appState.showTrips = true }
+        divider
+        MobileSettingsRow(title: "Trip summary") { appState.showTripSummary = true }
+    }
+
+    private var divider: some View {
+        Divider().overlay(PulseTheme.line.opacity(0.45))
     }
 
     private func exportExcel() async {
@@ -183,8 +243,7 @@ struct SavingsGoalSheet: View {
                 TextField("Target amount", text: $target).keyboardType(.decimalPad)
                 TextField("Buffer months", text: $buffer).keyboardType(.decimalPad)
                 Section("Progress") {
-                    ProgressView(value: progress)
-                        .tint(PulseTheme.pink)
+                    ProgressView(value: progress).tint(PulseTheme.pink)
                     Text("Based on year-to-date net: \(MoneyFormat.string(appState.yearSummary(for: Date()).net))")
                         .foregroundStyle(PulseTheme.textMuted)
                 }

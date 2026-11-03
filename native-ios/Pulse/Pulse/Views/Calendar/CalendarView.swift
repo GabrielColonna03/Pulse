@@ -1,66 +1,79 @@
 import SwiftUI
 
+/// Mirrors mobile web Calendar: month switcher, spending/net summary, day-grouped rows.
 struct CalendarView: View {
     @EnvironmentObject private var appState: AppState
 
-    private var month: MonthSummary { appState.monthSummary(for: appState.selectedMonth) }
+    private var month: MonthSummary { appState.monthSummary(for: appState.activeMonth) }
     private var groups: [(date: Date, items: [Transaction])] { appState.calendarGroups() }
 
     var body: some View {
         ZStack {
             PulseBackground()
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    ScreenHeader(title: "Calendar", subtitle: "Day-by-day for the selected month")
-                    MonthSwitcher()
+                VStack(alignment: .leading, spacing: 16) {
+                    MobileMonthSwitcher(
+                        kicker: "Calendar",
+                        title: appState.activeMonthLabel,
+                        canGoForward: appState.monthOffset > 0,
+                        onBack: { appState.shiftMonthBack() },
+                        onForward: { appState.shiftMonthForward() }
+                    )
 
-                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-                        MetricTile(label: "Spending", value: MoneyFormat.string(month.spending), accent: PulseTheme.pink)
-                        MetricTile(label: "Net", value: MoneyFormat.string(month.net), accent: month.net >= 0 ? PulseTheme.green : PulseTheme.red)
-                    }
+                    MobileSummaryGrid(items: [
+                        .init(label: "Spending", value: MoneyFormat.string(month.spending)),
+                        .init(label: "Net", value: MoneyFormat.string(month.net))
+                    ])
 
-                    if groups.isEmpty {
-                        PulseCard {
-                            Text("No transactions logged this month.")
+                    MobilePageCard(title: "Transactions", trailing: "\(appState.selectedMonthTransactions.count)") {
+                        if groups.isEmpty {
+                            Text("No transactions for this month.")
                                 .foregroundStyle(PulseTheme.textMuted)
-                        }
-                    } else {
-                        ForEach(groups, id: \.date) { group in
-                            daySection(group.date, items: group.items)
+                                .font(.system(size: 14, design: .rounded))
+                        } else {
+                            ForEach(groups, id: \.date) { group in
+                                dayBlock(group.date, items: group.items)
+                                if group.date != groups.last?.date {
+                                    Divider().overlay(PulseTheme.line.opacity(0.4)).padding(.vertical, 4)
+                                }
+                            }
                         }
                     }
                 }
-                .padding(.horizontal, 18)
-                .padding(.top, 12)
+                .padding(.horizontal, 16)
+                .padding(.top, 10)
                 .padding(.bottom, 120)
             }
             .refreshable { await appState.refreshAll() }
         }
     }
 
-    private func daySection(_ date: Date, items: [Transaction]) -> some View {
+    private func dayBlock(_ date: Date, items: [Transaction]) -> some View {
         let formatter = DateFormatter()
-        formatter.dateFormat = "EEEE, MMM d"
-        let daySpend = items.filter(\.isExpense).reduce(0) { $0 + $1.amount }
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .none
 
-        return PulseCard {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Text(formatter.string(from: date))
-                        .font(.system(size: 15, weight: .semibold, design: .rounded))
-                    Spacer()
-                    Text(MoneyFormat.string(daySpend))
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(PulseTheme.textMuted)
-                }
-                ForEach(items) { tx in
-                    TransactionRowView(
-                        transaction: tx,
-                        onEdit: { appState.editTransaction(tx) },
-                        onDelete: { Task { await appState.deleteTransaction(tx) } }
-                    )
-                }
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(formatter.string(from: date))
+                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                Spacer()
+                Text("\(items.count)")
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .foregroundStyle(PulseTheme.textMuted)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Capsule().fill(Color.white.opacity(0.06)))
+            }
+            ForEach(items) { tx in
+                MobileTransactionRow(
+                    transaction: tx,
+                    tripName: appState.tripName(for: tx),
+                    onEdit: { appState.editTransaction(tx) },
+                    onDelete: { Task { await appState.deleteTransaction(tx) } }
+                )
             }
         }
+        .padding(.vertical, 4)
     }
 }

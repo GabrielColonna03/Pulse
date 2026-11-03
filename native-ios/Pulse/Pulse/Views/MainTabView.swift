@@ -2,15 +2,13 @@ import SwiftUI
 
 struct MainTabView: View {
     @EnvironmentObject private var appState: AppState
-    @State private var showSearch = false
-    @State private var showTrips = false
 
     var body: some View {
         ZStack(alignment: .bottom) {
             Group {
                 switch appState.selectedTab {
                 case .home:
-                    HomeView(onSearch: { showSearch = true }, onTrips: { showTrips = true })
+                    HomeView()
                 case .insights:
                     InsightsView()
                 case .calendar:
@@ -20,6 +18,12 @@ struct MainTabView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // Keep settings root when leaving the tab, matching mobile reset feel when re-entering via nav.
+            .onChange(of: appState.selectedTab) { _, tab in
+                if tab != .settings {
+                    appState.settingsView = .root
+                }
+            }
 
             PulseTabBar()
         }
@@ -30,12 +34,8 @@ struct MainTabView: View {
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
         }
-        .sheet(isPresented: $showSearch) {
+        .sheet(isPresented: $appState.showSearch) {
             SearchView()
-                .environmentObject(appState)
-        }
-        .sheet(isPresented: $showTrips) {
-            TripsView()
                 .environmentObject(appState)
         }
         .safeAreaInset(edge: .bottom) {
@@ -70,7 +70,7 @@ struct PulseTabBar: View {
                 }
                 .offset(y: -14)
             }
-            .accessibilityLabel("Quick Add")
+            .accessibilityLabel("Add transaction")
 
             ForEach([PulseTab.calendar, .settings], id: \.self) { tab in
                 tabButton(tab)

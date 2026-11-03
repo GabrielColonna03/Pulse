@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SearchView: View {
     @EnvironmentObject private var appState: AppState
+    @Environment(\.dismiss) private var dismiss
     @State private var query = ""
     @State private var results: [Transaction] = []
     @State private var sort = "date-desc"
@@ -52,18 +53,31 @@ struct SearchView: View {
                                 .listRowBackground(Color.clear)
                         } else {
                             ForEach(results) { tx in
-                                TransactionRowView(
+                                MobileTransactionRow(
                                     transaction: tx,
-                                    onEdit: { appState.editTransaction(tx) },
+                                    tripName: appState.tripName(for: tx),
+                                    onEdit: {
+                                        dismiss()
+                                        appState.editTransaction(tx)
+                                    },
                                     onDelete: {
                                         Task {
                                             await appState.deleteTransaction(tx)
                                             results.removeAll { $0.id == tx.id }
                                         }
-                                    },
-                                    showsSwipeActions: true
+                                    }
                                 )
                                 .listRowBackground(PulseTheme.surface)
+                                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                    Button(role: .destructive) {
+                                        Task {
+                                            await appState.deleteTransaction(tx)
+                                            results.removeAll { $0.id == tx.id }
+                                        }
+                                    } label: {
+                                        Label("Delete", systemImage: "trash")
+                                    }
+                                }
                             }
                         }
                     }
@@ -72,6 +86,11 @@ struct SearchView: View {
             }
             .navigationTitle("Search")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") { dismiss() }
+                }
+            }
         }
         .preferredColorScheme(.dark)
     }

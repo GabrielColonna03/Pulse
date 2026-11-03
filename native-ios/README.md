@@ -1,6 +1,8 @@
 # Pulse Native iOS
 
-Fully native SwiftUI remake of the Pulse mobile experience. Open this on your Mac in Xcode — it talks to the same Pulse backend as the web app.
+Fully native SwiftUI remake of the **mobile** Pulse experience
+(the phone UI in `renderMobilePage` — Home / Insights / Calendar / Settings),
+not the desktop dashboard. Open this on your Mac in Xcode — it talks to the same Pulse backend as the web app.
 
 ## Open the project
 

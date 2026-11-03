@@ -12,10 +12,22 @@ final class AppState: ObservableObject {
     @Published var trips: [Trip] = []
     @Published var categoryModel: CategoryModel = .default
     @Published var selectedTab: PulseTab = .home
-    @Published var selectedMonth: Date = Date()
+    /// Matches mobile web `state.monthOffset` (0 = current month; higher = further back).
+    @Published var monthOffset: Int = 0
+    /// Matches mobile web `state.insightsYearOffset` (0 = current year).
+    @Published var insightsYearOffset: Int = 0
+    @Published var settingsView: SettingsPane = .root
     @Published var statusMessage: String?
     @Published var errorMessage: String?
     @Published var showQuickAdd = false
+    @Published var showSearch = false
+    @Published var showTrips = false
+    @Published var showTripSummary = false
+    @Published var showCategories = false
+    @Published var showUsers = false
+    @Published var showSavings = false
+    @Published var showAPI = false
+    @Published var showChangePin = false
     @Published var quickAddDraft = TransactionDraft()
     @Published var savingsGoal: SavingsGoal = .default
     @Published var apiBaseURL: String = ""
@@ -23,6 +35,32 @@ final class AppState: ObservableObject {
     @Published var isRefreshing = false
 
     private let savingsKey = "pulse.savingsGoal"
+
+    enum SettingsPane: String {
+        case root, general, data, travel
+    }
+
+    struct InsightMerchant: Identifiable, Equatable {
+        var id: String { name + String(total) }
+        var name: String
+        var total: Double
+        var count: Int
+    }
+
+    struct InsightSubcategory: Identifiable, Equatable {
+        var id: String { name }
+        var name: String
+        var total: Double
+        var count: Int
+        var merchants: [InsightMerchant]
+    }
+
+    struct InsightGroup: Identifiable, Equatable {
+        var id: String { name }
+        var name: String
+        var total: Double
+        var subcategories: [InsightSubcategory]
+    }
 
     init() {
         Task { await bootstrap() }
@@ -32,13 +70,55 @@ final class AppState: ObservableObject {
     var isAdmin: Bool { profile?.isAdmin == true }
     var needsOnboarding: Bool { profile?.needsOnboarding == true }
 
+    var activeMonth: Date {
+        Calendar.current.date(byAdding: .month, value: -monthOffset, to: Date()) ?? Date()
+    }
+
+    var insightsYear: Date {
+        Calendar.current.date(byAdding: .year, value: -insightsYearOffset, to: Date()) ?? Date()
+    }
+
+    var activeMonthLabel: String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMMM yyyy"
+        return formatter.string(from: activeMonth)
+    }
+
+    var insightsYearLabel: String {
+        let year = Calendar.current.component(.year, from: insightsYear)
+        return "\(year) summary"
+    }
+
     var selectedMonthTransactions: [Transaction] {
-        transactions.filter { Calendar.current.isDate($0.dateValue, equalTo: selectedMonth, toGranularity: .month) }
-            .sorted { $0.dateValue > $1.dateValue }
+        transactions
+            .filter { Calendar.current.isDate($0.dateValue, equalTo: activeMonth, toGranularity: .month) }
+            .sorted {
+                let left = $0.createdAt ?? 0
+                let right = $1.createdAt ?? 0
+                if left != right { return left > right }
+                return $0.dateValue > $1.dateValue
+            }
+    }
+
+    /// Mobile Home "Recent transactions" uses latest 5 across all months by createdAt.
+    var recentTransactions: [Transaction] {
+        Array(
+            transactions
+                .sorted {
+                    let left = $0.createdAt ?? 0
+                    let right = $1.createdAt ?? 0
+                    if left != right { return left > right }
+                    return $0.dateValue > $1.dateValue
+                }
+                .prefix(5)
+        )
     }
 
     var yearTransactions: [Transaction] {
-        transactions.filter { Calendar.current.isDate($0.dateValue, equalTo: selectedMonth, toGranularity: .year) }
+        let year = Calendar.current.component(.year, from: insightsYear)
+        return transactions.filter {
+            Calendar.current.component(.year, from: $0.dateValue) == year
+        }
     }
 
     func monthSummary(for date: Date) -> MonthSummary {
@@ -47,7 +127,8 @@ final class AppState: ObservableObject {
     }
 
     func yearSummary(for date: Date) -> MonthSummary {
-        let txs = transactions.filter { Calendar.current.isDate($0.dateValue, equalTo: date, toGranularity: .year) }
+        let year = Calendar.current.component(.year, from: date)
+        let txs = transactions.filter { Calendar.current.component(.year, from: $0.dateValue) == year }
         return summarize(txs)
     }
 
@@ -57,27 +138,76 @@ final class AppState: ObservableObject {
         }
         var totals: [String: Double] = [:]
         for tx in expenses {
-            let key = tx.parentCategory.isEmpty ? "Other" : tx.parentCategory
+            let key = tx.parentCategory.isEmpty ? "Expenses" : tx.parentCategory
             totals[key, default: 0] += tx.amount
         }
         return totals.map { ($0.key, $0.value) }.sorted { $0.1 > $1.1 }
     }
 
-    func topMerchants(limit: Int = 5) -> [(name: String, total: Double)] {
-        var totals: [String: Double] = [:]
+    func insightGroups() -> [InsightGroup] {
+        var groups: [String: (total: Double, subs: [String: (total: Double, count: Int, merchants: [String: (name: String, total: Double, count: Int)])])] = [:]
+
         for tx in yearTransactions where tx.isExpense {
-            let key = tx.description.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !key.isEmpty else { continue }
-            totals[key, default: 0] += tx.amount
+            let parent = tx.parentCategory.isEmpty ? "Expenses" : tx.parentCategory
+            let sub = tx.category.isEmpty ? "Other" : tx.category
+            let merchantKey = mobileMerchantKey(tx.description)
+            var group = groups[parent] ?? (0, [:])
+            group.total += tx.amount
+            var subcategory = group.subs[sub] ?? (0, 0, [:])
+            subcategory.total += tx.amount
+            subcategory.count += 1
+            var merchant = subcategory.merchants[merchantKey] ?? (tx.description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Uncategorized" : tx.description.trimmingCharacters(in: .whitespacesAndNewlines), 0, 0)
+            merchant.total += tx.amount
+            merchant.count += 1
+            subcategory.merchants[merchantKey] = merchant
+            group.subs[sub] = subcategory
+            groups[parent] = group
         }
-        return totals.map { ($0.key, $0.value) }.sorted { $0.1 > $1.1 }.prefix(limit).map { $0 }
+
+        return groups.map { parent, value in
+            InsightGroup(
+                name: parent,
+                total: value.total,
+                subcategories: value.subs.map { name, sub in
+                    InsightSubcategory(
+                        name: name,
+                        total: sub.total,
+                        count: sub.count,
+                        merchants: sub.merchants.values
+                            .map { InsightMerchant(name: $0.name, total: $0.total, count: $0.count) }
+                            .sorted { $0.total > $1.total }
+                    )
+                }
+                .sorted { $0.total > $1.total }
+            )
+        }
+        .sorted { $0.total > $1.total }
+    }
+
+    func tripName(for transaction: Transaction) -> String? {
+        guard !transaction.tripId.isEmpty else { return nil }
+        if let embedded = transaction.tripName, !embedded.isEmpty { return embedded }
+        return trips.first(where: { $0.id == transaction.tripId })?.name
     }
 
     func calendarGroups() -> [(date: Date, items: [Transaction])] {
         let grouped = Dictionary(grouping: selectedMonthTransactions) {
             Calendar.current.startOfDay(for: $0.dateValue)
         }
-        return grouped.keys.sorted(by: >).map { ($0, grouped[$0] ?? []) }
+        return grouped.keys.sorted(by: >).map { day in
+            (day, (grouped[day] ?? []).sorted { $0.dateValue > $1.dateValue })
+        }
+    }
+
+    private func mobileMerchantKey(_ description: String) -> String {
+        let lowered = description.lowercased()
+        let stripped = lowered
+            .replacingOccurrences(of: #"\b(transaction|purchase|payment|pos|online|www)\b"#, with: " ", options: .regularExpression)
+            .replacingOccurrences(of: #"[#*]"#, with: " ", options: .regularExpression)
+            .replacingOccurrences(of: #"\b\d{2,}\b"#, with: " ", options: .regularExpression)
+            .replacingOccurrences(of: #"[^a-z0-9]+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return stripped.isEmpty ? "uncategorized" : stripped
     }
 
     // MARK: - Lifecycle
@@ -154,6 +284,9 @@ final class AppState: ObservableObject {
         transactions = []
         trips = []
         selectedTab = .home
+        settingsView = .root
+        monthOffset = 0
+        insightsYearOffset = 0
     }
 
     func unlockWithBiometrics() async {
@@ -301,11 +434,32 @@ final class AppState: ObservableObject {
         }
     }
 
-    func shiftMonth(by value: Int) {
-        if let date = Calendar.current.date(byAdding: .month, value: value, to: selectedMonth) {
-            selectedMonth = date
-            Haptics.selection()
-        }
+    /// Mobile web: previous-month increases offset; next-month decreases and stops at 0.
+    func shiftMonthBack() {
+        monthOffset += 1
+        Haptics.selection()
+    }
+
+    func shiftMonthForward() {
+        guard monthOffset > 0 else { return }
+        monthOffset -= 1
+        Haptics.selection()
+    }
+
+    func shiftYearBack() {
+        insightsYearOffset += 1
+        Haptics.selection()
+    }
+
+    func shiftYearForward() {
+        guard insightsYearOffset > 0 else { return }
+        insightsYearOffset -= 1
+        Haptics.selection()
+    }
+
+    func openSettingsPane(_ pane: SettingsPane) {
+        settingsView = pane
+        Haptics.selection()
     }
 
     func saveCategoryModel(_ model: CategoryModel) async -> Bool {

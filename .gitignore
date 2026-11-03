@@ -7,3 +7,7 @@ budget.db-journal
 .env
 .env.local
 .DS_Store
+xcuserdata/
+DerivedData/
+*.xcuserstate
+native-ios/Pulse/Pulse.xcodeproj/project.xcworkspace/xcuserdata/

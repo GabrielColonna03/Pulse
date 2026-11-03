@@ -431,15 +431,19 @@ function parseCookies(req) {
 }
 
 function setSessionCookie(res, token, expiresAt) {
+  // Production / HTTPS: SameSite=None; Secure so Capacitor and other
+  // cross-origin webviews can send credentialed cookies.
+  // Local HTTP keeps Lax so localhost cookie auth still works.
   const attributes = [
     `${SESSION_COOKIE_NAME}=${encodeURIComponent(token)}`,
     "Path=/",
     "HttpOnly",
-    "SameSite=Lax",
     `Expires=${new Date(expiresAt).toUTCString()}`
   ];
   if (IS_PRODUCTION) {
-    attributes.push("Secure");
+    attributes.push("SameSite=None", "Secure");
+  } else {
+    attributes.push("SameSite=Lax");
   }
   res.setHeader("Set-Cookie", attributes.join("; "));
 }
@@ -449,13 +453,27 @@ function clearSessionCookie(res) {
     `${SESSION_COOKIE_NAME}=`,
     "Path=/",
     "HttpOnly",
-    "SameSite=Lax",
     "Expires=Thu, 01 Jan 1970 00:00:00 GMT"
   ];
   if (IS_PRODUCTION) {
-    attributes.push("Secure");
+    attributes.push("SameSite=None", "Secure");
+  } else {
+    attributes.push("SameSite=Lax");
   }
   res.setHeader("Set-Cookie", attributes.join("; "));
+}
+
+function getBearerToken(req) {
+  const header = String(req.headers.authorization || "").trim();
+  const match = header.match(/^Bearer\s+(.+)$/i);
+  return match ? match[1].trim() : "";
+}
+
+async function resolveSession(req) {
+  const cookies = parseCookies(req);
+  const cookieToken = cookies[SESSION_COOKIE_NAME];
+  const bearerToken = getBearerToken(req);
+  return getSessionUser(cookieToken || bearerToken);
 }
 
 async function createSession(userId) {
@@ -503,8 +521,7 @@ async function destroySession(token) {
 }
 
 async function requireAuth(req, res, next) {
-  const cookies = parseCookies(req);
-  const session = await getSessionUser(cookies[SESSION_COOKIE_NAME]);
+  const session = await resolveSession(req);
   if (!session) {
     res.status(401).json({ error: "Not Authenticated" });
     return;
@@ -513,6 +530,7 @@ async function requireAuth(req, res, next) {
   req.userId = session.userId;
   req.displayName = session.displayName;
   req.isAdmin = session.isAdmin;
+  req.sessionToken = getBearerToken(req) || parseCookies(req)[SESSION_COOKIE_NAME] || "";
   next();
 }
 
@@ -1116,7 +1134,11 @@ app.post("/api/login", async (req, res) => {
     loginAttempts.delete(rateLimitKey);
     const session = await createSession(matchedUser.id);
     setSessionCookie(res, session.token, session.expiresAt);
-    res.json({ displayName: matchedUser.displayName });
+    res.json({
+      displayName: matchedUser.displayName,
+      token: session.token,
+      expiresAt: session.expiresAt
+    });
   } catch {
     res.status(500).json({ error: "Failed To Log In" });
   }
@@ -1124,14 +1146,14 @@ app.post("/api/login", async (req, res) => {
 
 app.post("/api/logout", async (req, res) => {
   const cookies = parseCookies(req);
-  await destroySession(cookies[SESSION_COOKIE_NAME]);
+  const bearerToken = getBearerToken(req);
+  await destroySession(cookies[SESSION_COOKIE_NAME] || bearerToken);
   clearSessionCookie(res);
   res.json({ ok: true });
 });
 
 app.get("/api/me", async (req, res) => {
-  const cookies = parseCookies(req);
-  const session = await getSessionUser(cookies[SESSION_COOKIE_NAME]);
+  const session = await resolveSession(req);
   if (!session) {
     res.status(401).json({ error: "Not Authenticated" });
     return;
@@ -1253,8 +1275,7 @@ app.delete("/api/users/:id", requireAuth, requireAdmin, async (req, res) => {
 });
 
 app.post("/api/users", async (req, res) => {
-  const cookies = parseCookies(req);
-  const session = await getSessionUser(cookies[SESSION_COOKIE_NAME]);
+  const session = await resolveSession(req);
   const requiredKey = String(process.env.ADMIN_SETUP_KEY || "");
   const setupKey = String(req.body?.setupKey || "");
   const isAuthorized = (session && session.isAdmin) || (requiredKey && setupKey === requiredKey);

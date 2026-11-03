@@ -36,9 +36,21 @@ in the user's hands.
 4. Open:
   - `http://localhost:4100`
 
+## Native iOS App (SwiftUI)
+
+A fully native SwiftUI client lives in [`native-ios/`](native-ios/README.md).
+
+```bash
+open native-ios/Pulse/Pulse.xcodeproj
+```
+
+Set your signing team, enter the API base URL on first launch, then sign in with
+your 4-digit PIN. The app uses Keychain-backed Bearer tokens, Face ID lock,
+haptics, swipe actions, and Swift Charts while calling the same Pulse API.
+
 ## iOS Capacitor App
 
-The repository uses a static frontend rather than a bundler. `npm run build:ios`
+The repository also keeps a Capacitor shell under `ios/`. `npm run build:ios`
 copies the frontend into `www/` and injects the API host from `PULSE_API_BASE`.
 The backend remains external and is never bundled into the native app.
 
